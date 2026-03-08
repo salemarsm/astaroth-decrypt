@@ -2,7 +2,7 @@
 
 Ferramenta em Go para descriptografar e descompactar payloads do malware Astaroth.
 
-Esta ferramenta foi desenvolvida para analisar amostras identificadas na campanha **Boto-cor-de-rosa**, documentada pela **Acronis** no post "[Boto-cor-de-rosa campaign reveals Astaroth WhatsApp-based worm activity in Brazil](https://www.acronis.com/pt/tru/posts/boto-cor-de-rosa-campaign-reveals-astaroth-whatsapp-based-worm-activity-in-brazil/)". A campanha utiliza técnicas de ofuscação avançadas, incluindo o uso de scripts AutoIt e arquivos de dados (`.tda`, `.dmp`) criptografados.
+Esta ferramenta foi desenvolvida para analisar amostras identificadas na campanha **Boto-cor-de-rosa**, documentada pela **Acronis** no post "[Boto-cor-de-rosa campaign reveals Astaroth WhatsApp-based worm activity in Brazil](https://www.acronis.com/pt/tru/posts/boto-cor-de-rosa-campaign-reveals-astaroth-whatsapp-based-worm-activity-in-brazil/)". A campanha utiliza técnicas de ofuscação avançadas, incluindo o uso de scripts AutoIt.
 
 ## Funcionalidades
 
