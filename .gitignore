@@ -1,0 +1,6 @@
+*.exe
+*.dmp
+*.tda
+payload_decrypted.bin
+.vscode/
+astaroth-whatsapp.code-workspace
