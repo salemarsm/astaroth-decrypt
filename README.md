@@ -35,6 +35,21 @@ This tool was developed to analyze samples identified in the **Boto-cor-de-rosa*
 - **Dependencies**: Only standard libraries and `syscall` for `ntdll.dll` interaction.
 - **Compatibility**: Windows (due to the use of native APIs).
 
+### Educational POCs (Restricted)
+
+To support cybersecurity lessons regarding Astaroth's wormable capabilities, two restricted Proof of Concept (POC) scripts are provided:
+
+1. **Python ([whatsapp_poc.py](whatsapp_poc.py))**: Uses Selenium.
+   ```bash
+   pip install selenium
+   python whatsapp_poc.py
+   ```
+2. **Go ([whatsapp_poc.go](whatsapp_poc.go))**: Uses the Rod library.
+   ```bash
+   go run whatsapp_poc.go
+   ```
+   _These POCs are strictly for educational use, with a 5-contact limit and no C2 connectivity._
+
 ---
 
 ## Português
